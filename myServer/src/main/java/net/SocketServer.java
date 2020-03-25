@@ -11,26 +11,26 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.*;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public class SocketServer {
     private int port;
     private static final int BUF_SIZE = 1024;
+    private static ServerSocketChannel server ;
+    private static Selector select;
 
     public SocketServer(int port){
         this.port = port;
     }
 
     public void init() {
-        ServerSocketChannel server = null;
         //获取选择器
-        Selector select = null;
-
         try{
             server=ServerSocketChannel.open();
             select=Selector.open();
@@ -62,31 +62,6 @@ public class SocketServer {
                         System.out.println("isConnectable = true");
                     }
                     iterator.remove();
-//                        SocketChannel client = (SocketChannel)selectionKey.channel();
-//                        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
-//                        int len = 0;
-//                        while ((len=client.read(byteBuffer))>0){
-//                        byteBuffer.flip();
-                            //接收rpc请求
-//                        RpcRequest request = (RpcRequest) SerializableUtil.getObject(client.socket().getInputStream());
-//                        System.out.println("收到请求: 来自id"+ request.getRequestId()+" 请求方法: "+request.getMethodName());
-//                            System.out.println("收到客户端数据： " + new String(byteBuffer.array(), 0, len));                        //获取这个接口对应的实现类, 创建实例
-//                        //获取这个接口对应的实现类, 创建实例
-//                        Object o = getObject(request.getClass());
-
-                            //执行这个方法,并获取返回值
-//                      Object resp = executeMethod(o,request.getMethodName(),request.getParameters());
-
-                            //准备Rpc响应返回
-//                        RpcResponse response = invokeResponse(request.getRequestId(),o,request.getMethodName(),request.getParameters());
-                            //放进bytebuffer
-//                        byteBuffer.put(SerializableUtil.toByteArray(response));
-                            //写入通道
-//                            client.write(byteBuffer);
-                            //清除
-//                        byteBuffer.clear();
-//                        }
-//                    }
                 }
             }
         }catch (IOException e){
@@ -114,15 +89,17 @@ public class SocketServer {
      * @return 返回的对象(执行结果)
      */
     private Object executeMethod(Object o,String methodName,Object[] params){
-        Object objR = null;
+        Object objR;
         Class<?>[] cs = new Class[params.length];
         for(int i=0;i<params.length;i++){
             Object param = params[i];
             cs[i] = param.getClass();
         }
         try{
-            Method m =o.getClass().getMethod(methodName);
+            Method m =o.getClass().getMethod(methodName,cs);
             objR = m.invoke(o,params);
+            System.out.println(objR);
+            return objR;
         } catch (NoSuchMethodException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
@@ -130,7 +107,7 @@ public class SocketServer {
         } catch (InvocationTargetException e) {
             e.printStackTrace();
         }
-        return objR;
+        return null;
     }
 
     private RpcResponse invokeResponse(RpcRequest request){
@@ -138,11 +115,18 @@ public class SocketServer {
         res.setError("应该没错");
         res.setRequestId(request.getRequestId());
         try {
-            Object obj = ServiceRegistry.getRegistClass(request.getClassName()).newInstance();
+            //获取对应的实现类名
+            String className = ServiceRegistry.getRegistClass(request.getClassName());
+            //创建实体
+            System.out.println(className);
+            Object obj = Class.forName(className).newInstance();
+            //实现方法
             res.setResult(executeMethod(obj,request.getMethodName(),request.getParameters()));
         } catch (InstantiationException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
             e.printStackTrace();
         }
 //        res.setResult(executeMethod(o,methodName,params));
@@ -174,30 +158,22 @@ public class SocketServer {
             buf.clear();
             len = sc.read(buf);
         }
+//        if(len == -1){
+//            sc.close();
+//        }
         RpcRequest request ;
         RpcResponse response ;
-
         request = (RpcRequest) SerializableUtil.getObject(bs);
-        System.out.println("收到请求: 来自id"+ request.getRequestId()+" 请求方法: "+request.getMethodName());
-//        System.out.println("收到客户端数据： " + new String(buf.array(), 0, len));
-//          Object o = getObject(request.getClassName());
-//          Object obj = ServiceRegistry.getRegistClass(request.getClassName()).newInstance();
+        System.out.println("收到请求... 来自id:"+ request.getRequestId()+" 请求方法: "+request.getMethodName());
         response=invokeResponse(request);
-        handlerWrite(key,response);
+        System.out.println("response:"+response.getRequestId());
 
-        if(len == -1){
-            sc.close();
-        }
+        handlerWrite(key,sc,response);
     }
-    private void handlerWrite(SelectionKey key,RpcResponse response) throws IOException {
-        ByteBuffer buf = (ByteBuffer) key.attachment();
-        buf.flip();
-        SocketChannel sc = (SocketChannel)key.channel();
-        while(buf.hasRemaining()){
-            buf.put(SerializableUtil.toByteArray(response));
-            sc.write(buf);
-        }
-        buf.compact();
+    private void handlerWrite(SelectionKey sk,
+                              SocketChannel sc,RpcResponse response) throws IOException {
+        sc.write(ByteBuffer.wrap(SerializableUtil.toByteArray(response)));
+        sk.interestOps(SelectionKey.OP_READ);
     }
 
     private void handlerWrite(SelectionKey key) throws IOException {
@@ -210,7 +186,14 @@ public class SocketServer {
         buf.compact();
     }
 
-
+    private static ThreadPoolExecutor pool =
+            new ThreadPoolExecutor(60, 300,
+                    60L, TimeUnit.SECONDS,new LinkedBlockingQueue<>(1000), new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, "rpc"+"--serverHandlerPool--" + r.hashCode());
+                }
+            });
 
 
 

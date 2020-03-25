@@ -2,6 +2,7 @@ package net;
 
 import protocal.RpcRequest;
 import protocal.RpcResponse;
+import test.api.UserDTO;
 import utils.SerializableUtil;
 
 import java.io.IOException;
@@ -13,14 +14,17 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.util.concurrent.TimeUnit;
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.*;
 
 public class SocketClient {
 
-    private Selector selector = null;
-    private SocketChannel sc = null;
-    private ByteBuffer buffer = ByteBuffer.allocate(1024);
+    private static Selector selector = null;
+    private static SocketChannel sc = null;
     private static SocketClient client = new SocketClient();
+    private FutureTask<RpcResponse> future ;
 
     private SocketClient(){
     }
@@ -29,7 +33,7 @@ public class SocketClient {
         return client;
     }
 
-    public SocketClient init(String ip,int port){
+    public void init(String ip,int port){
 
         try {
             selector = Selector.open();
@@ -43,7 +47,6 @@ public class SocketClient {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return this;
     }
 
     //获取代理
@@ -53,10 +56,13 @@ public class SocketClient {
             @Override
             public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                 String methodName = method.getName();
-                String clazzName = clazz.getSimpleName();
+                String clazzName = clazz.getName();
                 Class<?>[] parameterTypes = method.getParameterTypes();
 
                 RpcRequest request = new RpcRequest();
+
+                System.out.println(clazzName);
+
                 request.setClassName(clazzName);
                 request.setMethodName(methodName);
                 request.setParameterTypes(parameterTypes);
@@ -64,68 +70,51 @@ public class SocketClient {
                 request.setParameters(args);
 
                 System.out.println("id:"+request.getRequestId());
-                Object result = null;
 
+                //写
                 sc.write(ByteBuffer.wrap(SerializableUtil.toByteArray(request)));
-//                if(args == null || args.length == 0){
-//                    //没有参数
-//                    sc.write(ByteBuffer.wrap((clazzName+"/"+methodName+"()").getBytes()));
-//                }else{
-//                    int size = args.length;
-//                    String[] types = new String[size];
-//                    StringBuilder content = new StringBuilder(clazzName).
-//                            append("/").append(methodName).append("(");
-//                    for(int i=0;i<size;i++){
-//                        types[i]=args[i].getClass().getName();
-//                        content.append(types[i]).append(":").append(args[i]);
-//                        if(i!=size-1){
-//                            content.append(",");
-//                        }
-//                    }
-//                    content.append(")");
-//                    sc.write(ByteBuffer.wrap(content.toString().getBytes()));
-//                }
-                result = getResult();
-                return result;
+                TimeUnit.SECONDS.sleep(2);
+
+//                future = new FutureTask<>(new Task());
+
+//                pool.execute(future);
+
+
+
+                return getResponse().getResult();
             }
         });
     }
 
-    private Object getResult(){
+//    private class
+
+    private RpcResponse getResponse(){
         try{
+            System.out.println("reading...");
             while (selector.select()>0){
                 for(SelectionKey sk : selector.selectedKeys()){
                     selector.selectedKeys().remove(sk);
                     if(sk.isReadable()){
-                        SocketChannel sc = (SocketChannel)sk.channel();
-                        buffer.clear();
-                        sc.read(buffer);
-                        byte[] bs = buffer.array();
-
+                        SocketChannel sc = (SocketChannel) sk.channel();
+                        ByteBuffer buf = ByteBuffer.allocate(1024);
+                        int len = sc.read(buf);
+                        byte[] bs = new byte[1024];
+                        int i=0;
+                        while(len>0){
+                            buf.flip();
+                            //这里是什么意思?
+                            while (buf.hasRemaining()){
+//                              System.out.print((char)buf.get());
+                                bs[i]=buf.get();
+                                i++;
+                            }
+                            System.out.println();
+                            buf.clear();
+                            len = sc.read(buf);
+                        }
                         RpcResponse response =(RpcResponse)SerializableUtil.getObject(bs);
                         System.out.println("id:"+response.getRequestId()+"  result:"+response.getResult());
                         return response;
-//                        return SerializableUtil.
-
-//                        int p = buffer.position();
-//                        String result = new String(buffer.array(),0,p);
-//                        result = result.trim();
-//                        buffer.clear();
-//                        if(result.endsWith("null")||result.endsWith("NULL")){
-//                            return null;
-//                        }
-//                        String[] typeValue = result.split(":");
-//                        String type = typeValue[0];
-//                        String value = typeValue[1];
-//                        if(type.contains("Integer")||type.contains("int"))
-//                            return Integer.parseInt(value);
-//                        else if(type.contains("Float")||type.contains("float"))
-//                            return Float.parseFloat(value);
-//                        else if(type.contains("Long")||type.contains("long"))
-//                            return Long.parseLong(value);
-//                        else
-//                            return value;
-
                     }
                 }
             }
@@ -134,4 +123,54 @@ public class SocketClient {
         }
         return null;
     }
+
+
+
+    private static ThreadPoolExecutor pool =
+            new ThreadPoolExecutor(60, 300,
+                    60L, TimeUnit.SECONDS,new ArrayBlockingQueue<>(1000));
+
+
+//    private class Task implements Callable<RpcResponse> {
+//
+//        @Override
+//        public RpcResponse call() {
+//            try {
+//                System.out.println("call");
+//                while (selector.select() > 0) {
+//                    // 遍历每个有可用IO操作Channel对应的SelectionKey
+//                    for (SelectionKey sk : selector.selectedKeys()) {
+//                        // 删除正在处理的SelectionKey
+//                        selector.selectedKeys().remove(sk);
+//                        // 如果该SelectionKey对应的Channel中有可读的数据
+//                        if (sk.isReadable()) {
+//                            // 使用NIO读取Channel中的数据
+//                            SocketChannel sc = (SocketChannel) sk.channel();
+//                            ByteBuffer buff = ByteBuffer.allocate(1024);
+//                            int len = sc.read(buff);
+//                            int i=0;
+//                            byte[] bs = new byte[1024];
+//                            while(len>0){
+//                                buff.flip();
+//                                while(buff.hasRemaining()){
+//                                    System.out.print((char)buff.get());
+////                                    bs[i]=buff.get();
+////                                    i++;
+//                                }
+//                                buff.clear();
+//                                len = sc.read(buff);
+//                            }
+//                            RpcResponse response =(RpcResponse)SerializableUtil.getObject(bs);
+//                            System.out.println("id:"+response.getRequestId()+"  result:"+response.getResult());
+//                            return response;
+//                        }
+//                    }
+//                }
+//            } catch (IOException ex) {
+//                ex.printStackTrace();
+//            }
+//            return null;
+//        }
+//    }
+
 }

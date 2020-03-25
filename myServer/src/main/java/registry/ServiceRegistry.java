@@ -9,21 +9,21 @@ import java.io.IOException;
 public class ServiceRegistry {
 
 
-    public static void regist(String name,Class<?> obj){
+    public static void regist(String iface,String impName){
         Jedis jedis = RedisUtil.getJedis();
-        byte[] bs =SerializableUtil.toByteArray(obj);
         if (jedis != null) {
-            jedis.set(name,obj.getName());
+            jedis.set(iface,impName);
         }
     }
 
-    public static Class<?> getRegistClass(String key)  {
+    public static String getRegistClass(String key)  {
         Jedis jedis = RedisUtil.getJedis();
-        byte[] bs = new byte[0];
+        String res;
         if (jedis != null) {
-            bs = jedis.get(key.getBytes());
+            res = jedis.get(key);
+            return res;
         }
-        return (Class<?>) SerializableUtil.getObject(bs);
+        return null;
     }
 
 }

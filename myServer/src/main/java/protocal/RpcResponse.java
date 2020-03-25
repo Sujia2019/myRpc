@@ -1,6 +1,9 @@
 package protocal;
 
-public class RpcResponse {
+import java.io.Serializable;
+
+public class RpcResponse implements Serializable {
+    private static final long serialVersionUID = 321L;
     private String requestId;
     private String error;
     private Object result; //结果
