@@ -6,9 +6,10 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
+        <module name="core" />
         <module name="client" />
-        <module name="myServer" />
         <module name="server" />
+        <module name="myServer" />
         <module name="myClient" />
       </profile>
     </annotationProcessing>
