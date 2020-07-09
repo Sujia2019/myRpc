@@ -1,0 +1,8 @@
+
+# for idea
+*.iml
+/.idea
+*/target
+**/target
+.DS_Store
+.gitattributes
